@@ -1,0 +1,76 @@
+<!--
+  Starter midPoint resource snippet for this template.
+
+  Notes:
+  - You must adapt connector OID/name/driver/url/credentials for your environment.
+  - Set scriptRoots to the directory containing these scripts.
+  - This file is intentionally small: it only demonstrates how to point to scripts and how to model a role association.
+
+  For a complete resource example, see:
+  /Volumes/blackcat/workspace/connector/connector-scripted-sql/scriptedsql/ScriptedSQL.xml
+-->
+<resource xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+          xmlns:c="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+          xmlns:icfs="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/resource-schema-3"
+          xmlns:q="http://prism.evolveum.com/xml/ns/public/query-3"
+          xmlns:ri="http://midpoint.evolveum.com/xml/ns/public/resource/instance-3"
+          xmlns:icfc="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/connector-schema-3">
+
+    <name>ScriptedSQL - Postgres RBAC Template</name>
+
+    <connectorRef type="ConnectorType">
+        <filter>
+            <q:text>connectorType = "com.evolveum.polygon.connector.scripted.sql.ScriptedSQLConnector"</q:text>
+        </filter>
+    </connectorRef>
+
+    <c:connectorConfiguration>
+        <icfc:configurationProperties xmlns:icscscriptedsql="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/bundle/com.evolveum.polygon.connector-scripted-sql/com.evolveum.polygon.connector.scripted.sql.ScriptedSQLConnector">
+            <icscscriptedsql:createScriptFileName>CreateScript.groovy</icscscriptedsql:createScriptFileName>
+            <icscscriptedsql:updateScriptFileName>UpdateScript.groovy</icscscriptedsql:updateScriptFileName>
+            <icscscriptedsql:deleteScriptFileName>DeleteScript.groovy</icscscriptedsql:deleteScriptFileName>
+            <icscscriptedsql:schemaScriptFileName>SchemaScript.groovy</icscscriptedsql:schemaScriptFileName>
+            <icscscriptedsql:searchScriptFileName>SearchScript.groovy</icscscriptedsql:searchScriptFileName>
+            <icscscriptedsql:testScriptFileName>TestScript.groovy</icscscriptedsql:testScriptFileName>
+            <icscscriptedsql:syncScriptFileName>SyncScript.groovy</icscscriptedsql:syncScriptFileName>
+
+            <!-- Point to THIS folder on the midPoint server filesystem. -->
+            <icscscriptedsql:scriptRoots>/opt/midpoint/var/scripts/postgres-rbac/</icscscriptedsql:scriptRoots>
+            <icscscriptedsql:classpath>.</icscscriptedsql:classpath>
+            <icscscriptedsql:scriptBaseClass>BaseScript</icscscriptedsql:scriptBaseClass>
+
+            <icscscriptedsql:user>db_user</icscscriptedsql:user>
+            <icscscriptedsql:password><clearValue>db_password</clearValue></icscscriptedsql:password>
+            <icscscriptedsql:jdbcDriver>org.postgresql.Driver</icscscriptedsql:jdbcDriver>
+            <icscscriptedsql:jdbcUrlTemplate>jdbc:postgresql://HOST:5432/DB</icscscriptedsql:jdbcUrlTemplate>
+        </icfc:configurationProperties>
+    </c:connectorConfiguration>
+
+    <schemaHandling>
+        <objectType>
+            <kind>account</kind>
+            <intent>default</intent>
+            <default>true</default>
+            <objectClass>ri:AccountObjectClass</objectClass>
+
+            <!-- Example association:
+                 Account.roleNames contains role __NAME__ values (roles.name).
+                 midPoint can treat it as an entitlement association if you configure it like this.
+
+                 The exact XML for associations can vary by midPoint version and style.
+                 Use this only as a conceptual starting point and adjust to your midPoint version.
+            -->
+            <!--
+            <association>
+                <ref>ri:roleNames</ref>
+                <kind>entitlement</kind>
+                <intent>role</intent>
+                <direction>objectToSubject</direction>
+                <associationAttribute>ri:roleNames</associationAttribute>
+                <valueAttribute>icfs:name</valueAttribute>
+            </association>
+            -->
+        </objectType>
+    </schemaHandling>
+</resource>
+
