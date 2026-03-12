@@ -1,0 +1,52 @@
+<!--
+  Starter midPoint resource snippet for the auth_user JSON template.
+
+  Notes:
+  - Adapt connector OID/name/driver/url/credentials for your environment.
+  - Set scriptRoots to the directory containing these scripts on the midPoint server.
+-->
+<resource xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+          xmlns:c="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+          xmlns:icfs="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/resource-schema-3"
+          xmlns:q="http://prism.evolveum.com/xml/ns/public/query-3"
+          xmlns:ri="http://midpoint.evolveum.com/xml/ns/public/resource/instance-3"
+          xmlns:icfc="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/connector-schema-3">
+
+    <name>ScriptedSQL - auth_user JSON view</name>
+
+    <connectorRef type="ConnectorType">
+        <filter>
+            <q:text>connectorType = "com.evolveum.polygon.connector.scripted.sql.ScriptedSQLConnector"</q:text>
+        </filter>
+    </connectorRef>
+
+    <c:connectorConfiguration>
+        <icfc:configurationProperties xmlns:icscscriptedsql="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/bundle/com.evolveum.polygon.connector-scripted-sql/com.evolveum.polygon.connector.scripted.sql.ScriptedSQLConnector">
+            <icscscriptedsql:createScriptFileName>CreateScript.groovy</icscscriptedsql:createScriptFileName>
+            <icscscriptedsql:updateScriptFileName>UpdateScript.groovy</icscscriptedsql:updateScriptFileName>
+            <icscscriptedsql:deleteScriptFileName>DeleteScript.groovy</icscscriptedsql:deleteScriptFileName>
+            <icscscriptedsql:schemaScriptFileName>SchemaScript.groovy</icscscriptedsql:schemaScriptFileName>
+            <icscscriptedsql:searchScriptFileName>SearchScript.groovy</icscscriptedsql:searchScriptFileName>
+            <icscscriptedsql:testScriptFileName>TestScript.groovy</icscscriptedsql:testScriptFileName>
+
+            <!-- Point to THIS folder on the midPoint server filesystem. -->
+            <icscscriptedsql:scriptRoots>/opt/midpoint/var/scripts/auth-user-json/</icscscriptedsql:scriptRoots>
+            <icscscriptedsql:classpath>.</icscscriptedsql:classpath>
+            <icscscriptedsql:scriptBaseClass>BaseScript</icscscriptedsql:scriptBaseClass>
+
+            <icscscriptedsql:user>db_user</icscscriptedsql:user>
+            <icscscriptedsql:password><clearValue>db_password</clearValue></icscscriptedsql:password>
+            <icscscriptedsql:jdbcDriver>org.postgresql.Driver</icscscriptedsql:jdbcDriver>
+            <icscscriptedsql:jdbcUrlTemplate>jdbc:postgresql://HOST:5432/DB</icscscriptedsql:jdbcUrlTemplate>
+        </icfc:configurationProperties>
+    </c:connectorConfiguration>
+
+    <!--
+      schemaHandling is intentionally minimal here. In your real resource:
+      - map __NAME__/__UID__ to loginId
+      - map displayName/email/accountsJson as you need
+      - build accountsJson in midPoint mappings from user + projections,
+        then send it as a simple string attribute to this connector.
+    -->
+</resource>
+
