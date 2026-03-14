@@ -22,7 +22,8 @@ log.info("Entering " + operation + " Script")
 
 def sql = new Sql(connection)
 
-sql.eachRow("select 1 from ${BaseScript.TABLE_AUTH_USER} limit 1") { /* ignore */ }
+// Avoid Groovy GString parameterization for the table name; build a plain String.
+String testQuery = "select 1 from " + BaseScript.TABLE_AUTH_USER + " limit 1"
+sql.eachRow(testQuery) { /* ignore */ }
 
 return null
-

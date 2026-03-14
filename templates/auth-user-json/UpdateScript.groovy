@@ -8,13 +8,13 @@ import org.identityconnectors.framework.common.objects.*
 import java.sql.Connection
 
 /*
- * UpdateScript updates the auth_user row by __UID__ (login_id).
+ * UpdateScript updates the auth_user row by __UID__ (user_login_id).
  *
  * It supports changes to:
- * - displayName
- * - email
- * - accountsJson
- * and always refreshes the last_modified column.
+ * - userAccountId
+ * - userOid
+ * - accounts (JSON with all external accounts)
+ * and always refreshes the updated_at column.
  */
 
 def log = log as Log
@@ -54,14 +54,14 @@ Uid handleAuthUserUpdate(Sql sql) {
                 : AttributeUtil.getSingleValue(attribute)
 
         switch (attribute.getName()) {
-            case "displayName":
-                params.put(BaseScript.COL_DISPLAY_NAME, value)
+            case "userAccountId":
+                params.put(BaseScript.COL_USER_ACCOUNT_ID, value)
                 break
-            case "email":
-                params.put(BaseScript.COL_EMAIL, value)
+            case "userOid":
+                params.put(BaseScript.COL_USER_OID, value)
                 break
-            case "accountsJson":
-                params.put(BaseScript.COL_ACCOUNTS_JSON, value)
+            case "accounts":
+                params.put(BaseScript.COL_ACCOUNTS, value)
                 break
             default:
                 // Ignore unknown attributes in this minimal template.
@@ -85,11 +85,11 @@ Uid handleAuthUserUpdate(Sql sql) {
         sets.add("${k} = :${k}")
     }
     sb.append(sets.join(", "))
-    sb.append(" where ").append(BaseScript.COL_LOGIN_ID).append(" = :loginId")
+    sb.append(" where ").append(BaseScript.COL_USER_LOGIN_ID).append(" = :user_login_id")
 
     Map<String, Object> fullParams = [:]
     fullParams.putAll(params)
-    fullParams.put("loginId", loginId)
+    fullParams.put("user_login_id", loginId)
 
     sql.withTransaction {
         log.info("Executing UPDATE on {0} for loginId {1}", BaseScript.TABLE_AUTH_USER, loginId)
@@ -99,4 +99,3 @@ Uid handleAuthUserUpdate(Sql sql) {
 
     return new Uid(loginId)
 }
-

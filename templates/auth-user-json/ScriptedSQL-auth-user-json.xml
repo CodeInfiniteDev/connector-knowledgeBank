@@ -42,11 +42,11 @@
     </c:connectorConfiguration>
 
     <!--
-      schemaHandling is intentionally minimal here. In your real resource:
-      - map __NAME__/__UID__ to loginId
-      - map displayName/email/accountsJson as you need
-      - build accountsJson in midPoint mappings from user + projections,
-        then send it as a simple string attribute to this connector.
+      schemaHandling is intentionally minimal here. In your real resource you typically:
+      - map __NAME__/__UID__ to loginId (backed by user_login_id column)
+      - map a primary external account identifier to userAccountId (optional)
+      - map the midPoint user OID to userOid (optional)
+      - build the JSON string for accounts from user + projections,
+        then send it as the simple string attribute `accounts` to this connector.
     -->
 </resource>
-

@@ -38,8 +38,10 @@ switch (objectClass) {
 Object handleDeleteAuthUser(Sql sql, Uid uid) {
     String loginId = uid.getUidValue()
 
-    String query = "delete from ${BaseScript.TABLE_AUTH_USER} where ${BaseScript.COL_LOGIN_ID} = :loginId"
-    Map params = [loginId: loginId]
+    // Plain String; don't parametrize table/column names.
+    String query = "delete from " + BaseScript.TABLE_AUTH_USER +
+            " where " + BaseScript.COL_USER_LOGIN_ID + " = :user_login_id"
+    Map params = [user_login_id: loginId]
 
     sql.withTransaction {
         log.info("Executing DELETE on {0} for loginId {1}", BaseScript.TABLE_AUTH_USER, loginId)
@@ -49,4 +51,3 @@ Object handleDeleteAuthUser(Sql sql, Uid uid) {
 
     return null
 }
-

@@ -29,22 +29,21 @@ builder.schema({
         attributes {
             // Business attributes.
             //
-            // - __NAME__ / __UID__ will both map to login_id in this template.
+            // - __NAME__ / __UID__ will both map to user_login_id in this template.
             // - These attribute names are what midPoint mappings use.
-            loginId()
-            displayName()
-            email()
+            loginId()          // logical login; maps to user_login_id column
+            userAccountId()    // e.g. main account id in a primary system
+            userOid()          // optional midPoint user OID
 
             // This is the JSON string column that contains all external accounts:
             // [ { "resource": "...", "accountId": "..." }, ... ]
-            accountsJson()
+            accounts()
 
             // Optional, but often useful for troubleshooting and sync.
-            lastModified()
+            updatedAt()
         }
     }
 
     // Paged search option (offset-based).
     defineOperationOption OperationOptionInfoBuilder.buildPagedResultsOffset(), SearchOp
 })
-

@@ -47,19 +47,20 @@ void handleAuthUserSearch(Sql sql) {
         ICFObjectBuilder.co {
             objectClass ObjectClass.ACCOUNT
 
-            // __UID__ and __NAME__ both use login_id.
-            uid row[BaseScript.COL_LOGIN_ID] as String
-            id row[BaseScript.COL_LOGIN_ID]
+            // __UID__ and __NAME__ both use user_login_id.
+            uid row[BaseScript.COL_USER_LOGIN_ID] as String
+            id row[BaseScript.COL_USER_LOGIN_ID]
 
-            attribute 'loginId', row[BaseScript.COL_LOGIN_ID]
-            attribute 'displayName', row[BaseScript.COL_DISPLAY_NAME]
-            attribute 'email', row[BaseScript.COL_EMAIL]
-            attribute 'accountsJson', row[BaseScript.COL_ACCOUNTS_JSON]
-            attribute 'lastModified', row[BaseScript.COL_UPDATED_AT]
+            attribute 'loginId', row[BaseScript.COL_USER_LOGIN_ID]
+            attribute 'userAccountId', row[BaseScript.COL_USER_ACCOUNT_ID]
+            attribute 'userOid', row[BaseScript.COL_USER_OID]
+            attribute 'accounts', row[BaseScript.COL_ACCOUNTS]
+            attribute 'updatedAt', row[BaseScript.COL_UPDATED_AT]
         }
     }
 
-    String sqlQuery = "select * from ${BaseScript.TABLE_AUTH_USER}"
+    // Build as plain String to avoid treating the table name as a SQL parameter.
+    String sqlQuery = "select * from " + BaseScript.TABLE_AUTH_USER
 
     sql.withTransaction {
         log.info("Executing SELECT on {0}", BaseScript.TABLE_AUTH_USER)
@@ -69,4 +70,3 @@ void handleAuthUserSearch(Sql sql) {
         }
     }
 }
-

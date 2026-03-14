@@ -41,27 +41,59 @@ switch (objectClass) {
 }
 
 Uid handleAuthUserCreate(Sql sql) {
+    // Prefer explicit loginId attribute; fall back to __NAME__ (id).
     String loginId = id
 
-    String displayName = AttributeUtil.getStringValue(AttributeUtil.find("displayName", attributes))
-    String email       = AttributeUtil.getStringValue(AttributeUtil.find("email", attributes))
-    String accountsJson = AttributeUtil.getStringValue(AttributeUtil.find("accountsJson", attributes))
+    def loginAttr = AttributeUtil.find("loginId", attributes)
+    if (loginAttr != null) {
+        loginId = AttributeUtil.getStringValue(loginAttr)
+    }
+
+    if (loginId == null || loginId.trim().isEmpty()) {
+        throw new ConnectorException("Required attribute loginId is missing or empty for CREATE")
+    }
+
+    // Attributes may be missing in some flows; handle nulls gracefully instead of NPE.
+    String userAccountId = null
+    String userOid = null
+    String accounts = null
+
+    def userAccountAttr = AttributeUtil.find("userAccountId", attributes)
+    if (userAccountAttr != null) {
+        userAccountId = AttributeUtil.getStringValue(userAccountAttr)
+    }
+
+    def userOidAttr = AttributeUtil.find("userOid", attributes)
+    if (userOidAttr != null) {
+        userOid = AttributeUtil.getStringValue(userOidAttr)
+    }
+
+    def accountsAttr = AttributeUtil.find("accounts", attributes)
+    if (accountsAttr != null) {
+        accounts = AttributeUtil.getStringValue(accountsAttr)
+    }
 
     Map params = [
-            (BaseScript.COL_LOGIN_ID)     : loginId,
-            (BaseScript.COL_DISPLAY_NAME) : displayName,
-            (BaseScript.COL_EMAIL)        : email,
-            (BaseScript.COL_ACCOUNTS_JSON): accountsJson,
-            (BaseScript.COL_UPDATED_AT)   : new java.sql.Timestamp(System.currentTimeMillis())
+            (BaseScript.COL_USER_LOGIN_ID)   : loginId,
+            (BaseScript.COL_USER_ACCOUNT_ID) : userAccountId,
+            (BaseScript.COL_USER_OID)        : userOid,
+            (BaseScript.COL_ACCOUNTS)        : accounts,
+            (BaseScript.COL_UPDATED_AT)      : new java.sql.Timestamp(System.currentTimeMillis())
     ]
 
-    String query = """
-        insert into ${BaseScript.TABLE_AUTH_USER}
-            (${BaseScript.COL_LOGIN_ID}, ${BaseScript.COL_DISPLAY_NAME},
-             ${BaseScript.COL_EMAIL}, ${BaseScript.COL_ACCOUNTS_JSON},
-             ${BaseScript.COL_UPDATED_AT})
-        values (:loginId, :displayName, :email, :accountsJson, :updatedAt)
-    """
+    // Build SQL as a plain String so table/column names are inlined, and only the
+    // value placeholders use named parameters.
+    String query =
+            "insert into " + BaseScript.TABLE_AUTH_USER +
+            " (" +
+                BaseScript.COL_USER_LOGIN_ID + ", " +
+                BaseScript.COL_USER_ACCOUNT_ID + ", " +
+                BaseScript.COL_USER_OID + ", " +
+                BaseScript.COL_ACCOUNTS + ", " +
+                BaseScript.COL_UPDATED_AT +
+            ") values (" +
+                ":user_login_id, :user_account_id, :user_oid, :accounts, :updated_at" +
+            ")"
 
     sql.withTransaction {
         try {
@@ -75,4 +107,3 @@ Uid handleAuthUserCreate(Sql sql) {
     // We choose __UID__ == login_id for simplicity.
     return new Uid(loginId)
 }
-

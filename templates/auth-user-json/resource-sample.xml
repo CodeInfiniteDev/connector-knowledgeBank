@@ -1,0 +1,140 @@
+<resource xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3" xmlns:c="http://midpoint.evolveum.com/xml/ns/public/common/common-3" xmlns:icfs="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/resource-schema-3" xmlns:org="http://midpoint.evolveum.com/xml/ns/public/common/org-3" xmlns:q="http://prism.evolveum.com/xml/ns/public/query-3" xmlns:ri="http://midpoint.evolveum.com/xml/ns/public/resource/instance-3" xmlns:t="http://prism.evolveum.com/xml/ns/public/types-3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" oid="00000000-0000-0000-0000-000000000000" version="0">
+    <_metadata id="1">
+        <storage>
+            <createTimestamp>2026-01-01T00:00:00.000Z</createTimestamp>
+            <creatorRef oid="00000000-0000-0000-0000-000000000002" relation="org:default" type="c:UserType"/>
+            <createChannel>http://midpoint.evolveum.com/xml/ns/public/common/channels-3#user</createChannel>
+        </storage>
+        <process>
+            <requestTimestamp>2026-01-01T00:00:00.000Z</requestTimestamp>
+            <requestorRef oid="00000000-0000-0000-0000-000000000002" relation="org:default" type="c:UserType"/>
+        </process>
+    </_metadata>
+    <name>authuser</name>
+    <lifecycleState>proposed</lifecycleState>
+    <iteration>0</iteration>
+    <iterationToken/>
+    <operationalState>
+        <lastAvailabilityStatus>up</lastAvailabilityStatus>
+        <message>Status set to UP</message>
+        <timestamp>2026-01-01T00:00:00.000Z</timestamp>
+        <nodeId>DefaultNode</nodeId>
+    </operationalState>
+    <connectorRef oid="efa9f3c9-799c-43cc-b50f-21680abe346e" relation="org:default" type="c:ConnectorType"/>
+    <connectorConfiguration xmlns:icfc="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/connector-schema-3">
+        <icfc:configurationProperties xmlns:cfg="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/bundle/com.evolveum.polygon.connector-scripted-sql/com.evolveum.polygon.connector.scripted.sql.ScriptedSQLConnector">
+            <cfg:createScriptFileName>CreateScript.groovy</cfg:createScriptFileName>
+            <cfg:deleteScriptFileName>DeleteScript.groovy</cfg:deleteScriptFileName>
+            <cfg:scriptBaseClass>BaseScript</cfg:scriptBaseClass>
+            <cfg:scriptRoots>/path/to/scripts</cfg:scriptRoots>
+            <cfg:searchScriptFileName>SearchScript.groovy</cfg:searchScriptFileName>
+            <cfg:updateScriptFileName>UpdateScript.groovy</cfg:updateScriptFileName>
+            <cfg:classpath>.</cfg:classpath>
+            <cfg:schemaScriptFileName>SchemaScript.groovy</cfg:schemaScriptFileName>
+            <cfg:testScriptFileName>TestScript.groovy</cfg:testScriptFileName>
+            <cfg:user>[USERNAME]</cfg:user>
+            <cfg:password>
+                <t:encryptedData>
+                    <t:encryptionMethod>
+                        <t:algorithm xmlns="http://prism.evolveum.com/xml/ns/public/types-3">http://www.w3.org/2001/04/xmlenc#aes256-cbc</t:algorithm>
+                    </t:encryptionMethod>
+                    <t:keyInfo>
+                        <t:keyName>[KEY_NAME_PLACEHOLDER]</t:keyName>
+                    </t:keyInfo>
+                    <t:cipherData>
+                        <t:cipherValue>[CIPHER_VALUE_PLACEHOLDER]</t:cipherValue>
+                    </t:cipherData>
+                </t:encryptedData>
+            </cfg:password>
+            <cfg:jdbcDriver>org.postgresql.Driver</cfg:jdbcDriver>
+            <cfg:jdbcUrlTemplate xmlns="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/bundle/com.evolveum.polygon.connector-scripted-sql/com.evolveum.polygon.connector.scripted.sql.ScriptedSQLConnector">jdbc:postgresql://[SERVER_IP]:5432/database_name</cfg:jdbcUrlTemplate>
+        </icfc:configurationProperties>
+    </connectorConfiguration>
+    <schemaHandling>
+        <objectType id="6">
+            <kind>account</kind>
+            <intent>default</intent>
+            <displayName>useraccountinfo</displayName>
+            <default>true</default>
+            <delineation>
+                <objectClass>ri:AccountObjectClass</objectClass>
+            </delineation>
+            <focus>
+                <type>c:UserType</type>
+            </focus>
+            <attribute id="7">
+                <ref>ri:loginId</ref>
+                <outbound>
+                    <name>loginId outbound</name>
+                    <strength>strong</strength>
+                    <source>
+                        <path>name</path>
+                    </source>
+                </outbound>
+            </attribute>
+            <attribute id="8">
+                <ref>ri:userAccountId</ref>
+                <outbound>
+                    <name>accountId outbound</name>
+                    <strength>weak</strength>
+                    <source>
+                        <path>name</path>
+                    </source>
+                </outbound>
+            </attribute>
+            <attribute id="10">
+                <ref>ri:accounts</ref>
+                <outbound>
+                    <name>accounts outbound</name>
+                    <strength>strong</strength>
+                    <expression>
+                        <script>
+                            <code>import com.evolveum.midpoint.xml.ns._public.common.common_3.*
+                                import groovy.json.JsonOutput
+                                import com.evolveum.midpoint.schema.result.OperationResult
+
+                                def u = focus as UserType
+                                def repo = midpoint.repositoryService
+
+                                def entries = []
+
+                                // Iterate all projections (linked accounts)
+                                (u.linkRef ?: []).each { linkRef -&gt;
+                                def shadowOid = linkRef.oid
+                                if (!shadowOid) {
+                                return
+                                }
+
+                                def shadowObj = repo.getObject(ShadowType.class, shadowOid, null,
+                                new OperationResult("loadShadow"))
+                                def shadow = shadowObj.asObjectable()
+
+                                // Resolve resource name
+                                def resOid = shadow.resourceRef?.oid
+                                def resObj = resOid ?
+                                repo.getObject(ResourceType.class, resOid, null,
+                                new OperationResult("loadResource")) : null
+                                def res = resObj?.asObjectable()
+                                def resourceName = res?.name?.orig ?: "UNKNOWN"
+
+                                // Decide what you want as resource_account_id
+                                // Simplest: use ICF name (icfs:name) if present, else shadow name
+                                def accountId = shadow.name?.orig
+
+                                if (accountId) {
+                                entries &lt;&lt; [
+                                resource  : resourceName,
+                                accountId : accountId.toString()
+                                ]
+                                }
+                                }
+
+                                // Return JSON string
+                                JsonOutput.toJson(entries)</code>
+                        </script>
+                    </expression>
+                </outbound>
+            </attribute>
+        </objectType>
+    </schemaHandling>
+</resource>
