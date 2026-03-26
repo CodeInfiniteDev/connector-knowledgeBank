@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    HR System (SCIM) Resource Configuration
+
+    Environment-specific values:
+      - baseAddress: uses <const> expression (plain string, NOT ProtectedStringType)
+      - password: uses <t:externalData> (ProtectedStringType - secrets provider OK)
+
+    Constants are defined via MP_SET_ env vars in docker-compose / .env files:
+      MP_SET_midpoint_constants_hrBaseAddress=https://hr.example.com/scim/v2
+      MP_SET_midpoint_constants_hrHost=hr.example.com
+-->
+<resource xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+          xmlns:cfg="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/connector-schema-3"
+          xmlns:t="http://prism.evolveum.com/xml/ns/public/types-3"
+          xmlns:ri="http://midpoint.evolveum.com/xml/ns/public/resource/instance-3"
+          oid="a1b2c3d4-e5f6-7890-abcd-ef1234567890">
+
+    <name>HR-System</name>
+    <description>HR System SCIM resource</description>
+
+    <connectorRef type="ConnectorType">
+        <filter>
+            <q:equal xmlns:q="http://prism.evolveum.com/xml/ns/public/query-3">
+                <q:path>connectorType</q:path>
+                <q:value>com.evolveum.polygon.connector.scim.ScimConnector</q:value>
+            </q:equal>
+        </filter>
+    </connectorRef>
+
+    <connectorConfiguration>
+        <cfg:configurationProperties>
+            <!--
+                baseAddress is a plain xsd:string property.
+                CANNOT use <t:externalData> here - it only works for ProtectedStringType.
+                Use <const> expression instead, which reads from config.xml constants
+                or MP_SET_midpoint_constants_hrBaseAddress env var.
+            -->
+            <cfg:baseAddress>
+                <expression>
+                    <const>hrBaseAddress</const>
+                </expression>
+            </cfg:baseAddress>
+
+            <!--
+                password IS a ProtectedStringType field.
+                <t:externalData> works correctly here.
+                The value is resolved from the secrets provider at runtime.
+            -->
+            <cfg:password>
+                <value>
+                    <t:externalData>
+                        <t:provider>properties-provider</t:provider>
+                        <t:key>hr.password</t:key>
+                    </t:externalData>
+                </value>
+            </cfg:password>
+
+            <cfg:username>
+                <expression>
+                    <const>hrUsername</const>
+                </expression>
+            </cfg:username>
+        </cfg:configurationProperties>
+    </connectorConfiguration>
+
+    <schemaHandling>
+        <objectType>
+            <kind>account</kind>
+            <intent>default</intent>
+            <default>true</default>
+            <objectClass>ri:AccountObjectClass</objectClass>
+        </objectType>
+    </schemaHandling>
+</resource>

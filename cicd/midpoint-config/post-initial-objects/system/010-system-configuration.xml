@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    System Configuration with Secrets Providers
+    Imported via post-initial-objects on startup.
+
+    Secrets providers are configured here and referenced in resource configs.
+    Constants are injected via MP_SET_ environment variables (not in this file).
+-->
+<systemConfiguration xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+                     oid="00000000-0000-0000-0000-000000000001">
+    <name>SystemConfiguration</name>
+
+    <secretsProviders>
+        <!-- Properties file provider: reads key=value pairs from a mounted file -->
+        <properties>
+            <identifier>properties-provider</identifier>
+            <description>Secrets from properties file (mounted via Docker volume)</description>
+            <propertiesFile>/opt/midpoint/var/secrets/secrets.properties</propertiesFile>
+            <cache>PT1H</cache>
+        </properties>
+
+        <!-- Environment variables provider: reads MP_ prefixed env vars -->
+        <environmentVariables>
+            <identifier>env-provider</identifier>
+            <description>Secrets from environment variables</description>
+            <allowKeyPrefix>SECRET_</allowKeyPrefix>
+        </environmentVariables>
+    </secretsProviders>
+</systemConfiguration>

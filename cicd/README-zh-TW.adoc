@@ -1,0 +1,354 @@
+= MidPoint CI/CD 搭配 GitLab Pipeline 指南
+:toc: left
+:toclevels: 3
+:sectnums:
+
+== 概述
+
+本指南說明如何使用 GitLab CI/CD Pipeline、Docker Compose 及 midPoint 內建機制來建立持續部署 (CD) 流程：
+
+* *post-initial-objects* - 啟動時自動匯入 XML 設定檔
+* *Constants（常數）* - 環境特定的值（URL、主機名稱、連接埠）
+* *Secrets Providers（密鑰提供者）* - 密碼與憑證
+* *MP_ENTRY_POINT* - 容器進入點，用於預載設定檔案
+
+Git 儲存庫作為所有 midPoint 設定物件的唯一真實來源（Single Source of Truth）。
+
+=== 架構
+
+[source]
+----
+Git 儲存庫（唯一真實來源）
+  |
+  |-- post-initial-objects/     XML 設定物件（資源、角色、策略）
+  |-- env/                      環境特定常數（dev, sit, uat, prod）
+  |-- secrets/                  密鑰屬性檔（不提交至 Git）
+  |
+  v
+GitLab CI/CD Pipeline
+  |-- validate    XML 格式驗證
+  |-- build       打包設定檔
+  |-- deploy      部署至目標環境
+        |
+        v
+Docker Compose
+  |-- MP_ENTRY_POINT            將 post-initial-objects 複製到 MIDPOINT_HOME
+  |-- MP_SET_ 環境變數          注入常數（URL、主機、連接埠）
+  |-- Secrets 掛載卷            掛載密碼屬性檔
+        |
+        v
+MidPoint 啟動
+  |-- 匯入 post-initial-objects（覆寫既有物件，加上 .done 後綴）
+  |-- 透過常數解析 <const> 表達式
+  |-- 透過密鑰提供者解析 <t:externalData>
+----
+
+=== 環境
+
+|===
+| 環境 | 用途 | 部署觸發方式
+
+| DEV
+| 開發與初步測試
+| 合併至 main 時自動部署
+
+| SIT
+| 系統整合測試
+| 手動觸發
+
+| UAT
+| 使用者驗收測試
+| 手動觸發
+
+| PROD
+| 正式環境
+| 手動觸發（需審核）
+|===
+
+== 核心概念
+
+=== post-initial-objects
+
+MidPoint 啟動時會自動匯入 `$MIDPOINT_HOME/post-initial-objects/` 目錄下的 XML 檔案。
+
+行為：
+
+* 檔案依字母順序匯入（使用數字前綴：`010-`、`100-`、`200-`）
+* 匯入成功後，檔案會被加上 `.done` 後綴
+* 若物件已存在（以 OID 比對），會被*覆寫*
+* 支援子目錄組織（`system/`、`resources/`、`roles/`）
+
+若要強制重新匯入已變更的物件，在重啟 midPoint 前刪除其 `.done` 檔案。
+
+=== MP_ENTRY_POINT
+
+`midpoint.sh` 中的 `MP_ENTRY_POINT` 環境變數指定一個來源目錄，其內容會在 midPoint 啟動前被複製到 `$MIDPOINT_HOME`。
+
+[source,bash]
+----
+MP_ENTRY_POINT=/opt/midpoint-dirs-docker-entrypoint
+----
+
+行為（來自 `midpoint.sh` 第 202-220 行）：
+
+* 遍歷 `MP_ENTRY_POINT` 下的頂層子目錄
+* 對每個檔案，僅在以下條件成立時複製到 `$MIDPOINT_HOME/<子目錄>/<檔案>`：
+** 目標檔案*不存在*，且
+** `.done` 版本*不存在*
+* 這使得容器重複啟動是安全的——已匯入的檔案會被跳過
+
+Docker 部署時，將設定目錄掛載到 `MP_ENTRY_POINT` 路徑：
+
+[source,yaml]
+----
+volumes:
+  - ./midpoint-config/post-initial-objects:/opt/midpoint-dirs-docker-entrypoint/post-initial-objects:ro
+----
+
+=== Constants vs Secrets Providers vs 環境變數
+
+這是最重要的設計決策。針對不同類型的值使用正確的機制：
+
+|===
+| 機制 | 適用場景 | 定義位置 | XML 用法
+
+| Constants（環境變數）
+| 非機密、環境特定的值：URL、主機名稱、連接埠、Base DN
+| `.env` 檔案中的 `MP_SET_midpoint_constants_<名稱>=<值>`
+| 表達式中使用 `<const>名稱</const>`
+
+| Secrets Provider（屬性檔）
+| 密碼、API 金鑰、憑證（*僅限 ProtectedStringType 欄位*）
+| 透過 Docker 掛載卷的屬性檔
+| `<value>` 元素內的 `<t:externalData>`
+
+| `resolveSecretString()`
+| 非 ProtectedString 但需要密鑰值的欄位
+| 同上述屬性檔
+| `<script><code>basic.resolveSecretString('provider', 'key')</code></script>`
+|===
+
+IMPORTANT: `<t:externalData>` *僅*適用於 `ProtectedStringType` 欄位（密碼、憑證）。若用在 `baseAddress` 等純 `xsd:string` 欄位上，會出現錯誤：`SchemaException: cannot marshall property value PPV(null): marshaller returned null`。
+
+=== Constants 運作方式
+
+常數透過 `MP_SET_` 前綴的環境變數定義：
+
+[source,bash]
+----
+# 在 .env 檔案或 docker-compose 環境中：
+MP_SET_midpoint_constants_hrBaseAddress=https://hr.example.com/scim/v2
+----
+
+`midpoint.sh` 腳本會將其轉換為 Java 系統屬性：
+
+[source]
+----
+-Dmidpoint.constants.hrBaseAddress=https://hr.example.com/scim/v2
+----
+
+在 XML 設定中，使用 `<const>` 表達式求值器引用常數：
+
+[source,xml]
+----
+<cfg:baseAddress>
+    <expression>
+        <const>hrBaseAddress</const>
+    </expression>
+</cfg:baseAddress>
+----
+
+或在 Groovy 腳本中：
+
+[source,groovy]
+----
+midpoint.getConst('hrBaseAddress')
+----
+
+== 目錄結構
+
+[source]
+----
+cicd/
+├── .gitlab-ci.yml                          GitLab Pipeline 定義
+├── docker-compose.yml                      Docker Compose（midPoint + PostgreSQL）
+├── scripts/
+│   ├── deploy.sh                           部署腳本（依環境）
+│   └── validate.sh                         XML 驗證腳本
+└── midpoint-config/
+    ├── post-initial-objects/               啟動時匯入的 XML 物件
+    │   ├── system/
+    │   │   └── 010-system-configuration.xml
+    │   ├── resources/
+    │   │   └── 100-resource-hr-system.xml
+    │   └── roles/
+    │       └── 200-role-end-user.xml
+    ├── secrets/
+    │   └── secrets.properties.example      密鑰範例（勿提交真實密鑰）
+    └── env/
+        ├── dev.env                         DEV 常數
+        ├── sit.env                         SIT 常數
+        ├── uat.env                         UAT 常數
+        └── prod.env                        PROD 常數
+----
+
+== Pipeline 階段
+
+=== 1. Validate（驗證）
+
+使用 `xmllint` 檢查所有 XML 檔案的格式正確性：
+
+[source,bash]
+----
+bash scripts/validate.sh midpoint-config/post-initial-objects
+----
+
+=== 2. Build（建置）
+
+將設定打包為 tarball：
+
+[source,bash]
+----
+tar czf midpoint-config-${CI_COMMIT_SHORT_SHA}.tar.gz -C midpoint-config post-initial-objects/
+----
+
+=== 3. Deploy（部署）
+
+`deploy.sh` 腳本對每個環境執行：
+
+1. 偵測變更的 XML 檔案（透過 `git diff`）
+2. 移除變更檔案的 `.done` 標記（強制重新匯入）
+3. 使用正確的 `.env` 檔案重啟 midPoint 容器
+
+[source,bash]
+----
+bash scripts/deploy.sh dev    # 合併時自動
+bash scripts/deploy.sh sit    # 手動
+bash scripts/deploy.sh uat    # 手動
+bash scripts/deploy.sh prod   # 手動（需審核）
+----
+
+== 快速開始
+
+=== 1. 準備密鑰
+
+[source,bash]
+----
+cp midpoint-config/secrets/secrets.properties.example midpoint-config/secrets/secrets.properties
+# 編輯填入真實值 - 勿提交至 Git
+----
+
+=== 2. 啟動 DEV 環境
+
+[source,bash]
+----
+docker compose --env-file midpoint-config/env/dev.env up -d
+----
+
+=== 3. 驗證
+
+[source,bash]
+----
+# 檢查 post-initial-objects 匯入日誌
+docker compose logs -f midpoint | grep -i "import\|post-initial"
+
+# 存取 midPoint
+open http://localhost:8080/midpoint
+----
+
+=== 4. 更新設定
+
+1. 編輯 `post-initial-objects/` 中的 XML 檔案
+2. 提交並推送至 Git
+3. Pipeline 自動驗證並部署（DEV），或手動觸發（SIT/UAT/PROD）
+
+手動重新匯入（不透過 Pipeline）：
+
+[source,bash]
+----
+# 移除變更檔案的 .done
+docker exec midpoint bash -c "find /opt/midpoint/var/post-initial-objects -name '100-resource-hr-system.xml.done' -delete"
+# 重啟
+docker compose --env-file midpoint-config/env/dev.env restart midpoint
+----
+
+== 常見模式
+
+=== 新增資源
+
+1. 在 `post-initial-objects/resources/` 建立帶有固定 OID 的 XML 檔案
+2. 環境特定的連線屬性使用 `<const>`
+3. 密碼使用 `<t:externalData>`（僅限 ProtectedStringType）
+4. 在所有 `.env` 檔案中新增常數
+5. 在各環境的屬性檔中新增密鑰
+6. 提交並部署
+
+=== 更新既有物件
+
+1. 編輯 XML 檔案（保持相同 OID）
+2. 提交並推送
+3. Pipeline 的 `deploy.sh` 偵測變更、移除 `.done` 檔案、重啟 midPoint
+4. MidPoint 重新匯入物件，覆寫既有版本
+
+=== 新增常數
+
+1. 在所有 `.env` 檔案中新增：`NEW_CONSTANT=value`
+2. 在 `docker-compose.yml` 環境中新增：`MP_SET_midpoint_constants_newConstant=${NEW_CONSTANT}`
+3. 在 XML 中使用：`<const>newConstant</const>`
+
+== 疑難排解
+
+=== SchemaException: cannot marshall property value PPV(null)
+
+您在非 ProtectedStringType 欄位上使用了 `<t:externalData>`。請改用 `<const>` 表達式：
+
+[source,xml]
+----
+<!-- 錯誤：baseAddress 是 xsd:string，不是 ProtectedStringType -->
+<cfg:baseAddress>
+    <t:externalData>
+        <t:provider>properties-provider</t:provider>
+        <t:key>hr.baseAddress</t:key>
+    </t:externalData>
+</cfg:baseAddress>
+
+<!-- 正確：使用 const 表達式 -->
+<cfg:baseAddress>
+    <expression>
+        <const>hrBaseAddress</const>
+    </expression>
+</cfg:baseAddress>
+----
+
+=== 物件更新後未重新匯入
+
+檢查 `.done` 檔案是否存在：
+
+[source,bash]
+----
+docker exec midpoint find /opt/midpoint/var/post-initial-objects -name "*.done"
+----
+
+移除後重啟：
+
+[source,bash]
+----
+docker exec midpoint rm /opt/midpoint/var/post-initial-objects/resources/100-resource-hr-system.xml.done
+docker compose restart midpoint
+----
+
+=== 常數未解析
+
+確認常數已設為 Java 系統屬性：
+
+[source,bash]
+----
+docker exec midpoint bash -c "cat /proc/1/cmdline | tr '\0' '\n' | grep constants"
+----
+
+檢查 `.env` 檔案是否已載入：
+
+[source,bash]
+----
+docker compose --env-file midpoint-config/env/dev.env config | grep MP_SET
+----

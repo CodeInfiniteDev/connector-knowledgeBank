@@ -1,0 +1,354 @@
+= MidPoint CI/CD with GitLab Pipeline
+:toc: left
+:toclevels: 3
+:sectnums:
+
+== Overview
+
+This guide describes how to set up Continuous Deployment (CD) for midPoint configuration using GitLab CI/CD pipelines, Docker Compose, and midPoint's built-in mechanisms:
+
+* *post-initial-objects* - automatic import of XML configuration on startup
+* *Constants* - environment-specific values (URLs, hostnames, ports)
+* *Secrets Providers* - credentials and passwords
+* *MP_ENTRY_POINT* - container entrypoint for seeding configuration files
+
+The Git repository serves as the single source of truth for all midPoint configuration objects.
+
+=== Architecture
+
+[source]
+----
+Git Repository (single source of truth)
+  |
+  |-- post-initial-objects/     XML config objects (resources, roles, policies)
+  |-- env/                      Environment-specific constants (dev, sit, uat, prod)
+  |-- secrets/                  Secrets properties (NOT committed to Git)
+  |
+  v
+GitLab CI/CD Pipeline
+  |-- validate    XML well-formedness check
+  |-- build       Package config artifact
+  |-- deploy      Deploy to target environment
+        |
+        v
+Docker Compose
+  |-- MP_ENTRY_POINT            Copies post-initial-objects into MIDPOINT_HOME
+  |-- MP_SET_ env vars          Injects constants (URLs, hosts, ports)
+  |-- Secrets volume            Mounts properties file for passwords
+        |
+        v
+MidPoint Startup
+  |-- Imports post-initial-objects (overwrites existing, appends .done)
+  |-- Resolves <const> expressions using constants
+  |-- Resolves <t:externalData> using secrets providers
+----
+
+=== Environments
+
+|===
+| Environment | Purpose | Deployment Trigger
+
+| DEV
+| Development and initial testing
+| Automatic on merge to main
+
+| SIT
+| System Integration Testing
+| Manual trigger
+
+| UAT
+| User Acceptance Testing
+| Manual trigger
+
+| PROD
+| Production
+| Manual trigger with approval
+|===
+
+== Key Concepts
+
+=== post-initial-objects
+
+MidPoint automatically imports XML files from `$MIDPOINT_HOME/post-initial-objects/` on startup.
+
+Behavior:
+
+* Files are imported in alphabetical order (use numeric prefixes: `010-`, `100-`, `200-`)
+* After successful import, the file is renamed with `.done` suffix
+* Objects are *overwritten* if they already exist (matched by OID)
+* Subdirectories are supported for organization (`system/`, `resources/`, `roles/`)
+
+To force re-import of a changed object, delete its `.done` file before restarting midPoint.
+
+=== MP_ENTRY_POINT
+
+The `MP_ENTRY_POINT` environment variable in `midpoint.sh` specifies a source directory whose contents are copied into `$MIDPOINT_HOME` before midPoint starts.
+
+[source,bash]
+----
+MP_ENTRY_POINT=/opt/midpoint-dirs-docker-entrypoint
+----
+
+Behavior (from `midpoint.sh` lines 202-220):
+
+* Iterates over top-level subdirectories in `MP_ENTRY_POINT`
+* For each file, copies to `$MIDPOINT_HOME/<subdir>/<file>` only if:
+** The target file does NOT already exist, AND
+** A `.done` version does NOT exist
+* This makes it safe for repeated container restarts - already-imported files are skipped
+
+For Docker deployments, mount your config directory at the `MP_ENTRY_POINT` path:
+
+[source,yaml]
+----
+volumes:
+  - ./midpoint-config/post-initial-objects:/opt/midpoint-dirs-docker-entrypoint/post-initial-objects:ro
+----
+
+=== Constants vs Secrets Providers vs Environment Variables
+
+This is the most important design decision. Use the right mechanism for each type of value:
+
+|===
+| Mechanism | Use For | Where Defined | XML Usage
+
+| Constants (env var)
+| Non-secret, environment-specific values: URLs, hostnames, ports, base DNs
+| `MP_SET_midpoint_constants_<name>=<value>` in `.env` file
+| `<const>name</const>` in expressions
+
+| Secrets Provider (properties file)
+| Passwords, API keys, credentials (*ProtectedStringType fields ONLY*)
+| Properties file mounted as Docker volume
+| `<t:externalData>` inside `<value>` element
+
+| `resolveSecretString()`
+| Non-ProtectedString fields that need secret values
+| Same properties file as above
+| `<script><code>basic.resolveSecretString('provider', 'key')</code></script>`
+|===
+
+IMPORTANT: `<t:externalData>` *only* works for `ProtectedStringType` fields (passwords, credentials). If you use it on a plain `xsd:string` field like `baseAddress`, you will get: `SchemaException: cannot marshall property value PPV(null): marshaller returned null`.
+
+=== How Constants Work
+
+Constants are defined via environment variables using the `MP_SET_` prefix:
+
+[source,bash]
+----
+# In .env file or docker-compose environment:
+MP_SET_midpoint_constants_hrBaseAddress=https://hr.example.com/scim/v2
+----
+
+The `midpoint.sh` script converts this to a Java system property:
+
+[source]
+----
+-Dmidpoint.constants.hrBaseAddress=https://hr.example.com/scim/v2
+----
+
+In XML configuration, reference the constant with the `<const>` expression evaluator:
+
+[source,xml]
+----
+<cfg:baseAddress>
+    <expression>
+        <const>hrBaseAddress</const>
+    </expression>
+</cfg:baseAddress>
+----
+
+Or in Groovy scripts:
+
+[source,groovy]
+----
+midpoint.getConst('hrBaseAddress')
+----
+
+== Directory Structure
+
+[source]
+----
+cicd/
+├── .gitlab-ci.yml                          GitLab pipeline definition
+├── docker-compose.yml                      Docker Compose for midPoint + PostgreSQL
+├── scripts/
+│   ├── deploy.sh                           Deployment script (per environment)
+│   └── validate.sh                         XML validation script
+└── midpoint-config/
+    ├── post-initial-objects/               XML objects imported on startup
+    │   ├── system/
+    │   │   └── 010-system-configuration.xml
+    │   ├── resources/
+    │   │   └── 100-resource-hr-system.xml
+    │   └── roles/
+    │       └── 200-role-end-user.xml
+    ├── secrets/
+    │   └── secrets.properties.example      Example secrets (DO NOT commit real secrets)
+    └── env/
+        ├── dev.env                         DEV constants
+        ├── sit.env                         SIT constants
+        ├── uat.env                         UAT constants
+        └── prod.env                        PROD constants
+----
+
+== Pipeline Stages
+
+=== 1. Validate
+
+Checks all XML files for well-formedness using `xmllint`:
+
+[source,bash]
+----
+bash scripts/validate.sh midpoint-config/post-initial-objects
+----
+
+=== 2. Build
+
+Packages the configuration into a tarball artifact:
+
+[source,bash]
+----
+tar czf midpoint-config-${CI_COMMIT_SHORT_SHA}.tar.gz -C midpoint-config post-initial-objects/
+----
+
+=== 3. Deploy
+
+For each environment, the `deploy.sh` script:
+
+1. Detects changed XML files (via `git diff`)
+2. Removes `.done` markers for changed files (forces re-import)
+3. Restarts the midPoint container with the correct `.env` file
+
+[source,bash]
+----
+bash scripts/deploy.sh dev    # Auto on merge
+bash scripts/deploy.sh sit    # Manual
+bash scripts/deploy.sh uat    # Manual
+bash scripts/deploy.sh prod   # Manual with approval
+----
+
+== Quick Start
+
+=== 1. Prepare secrets
+
+[source,bash]
+----
+cp midpoint-config/secrets/secrets.properties.example midpoint-config/secrets/secrets.properties
+# Edit with real values - DO NOT commit to Git
+----
+
+=== 2. Start DEV environment
+
+[source,bash]
+----
+docker compose --env-file midpoint-config/env/dev.env up -d
+----
+
+=== 3. Verify
+
+[source,bash]
+----
+# Check logs for post-initial-objects import
+docker compose logs -f midpoint | grep -i "import\|post-initial"
+
+# Access midPoint
+open http://localhost:8080/midpoint
+----
+
+=== 4. Update configuration
+
+1. Edit XML files in `post-initial-objects/`
+2. Commit and push to Git
+3. Pipeline validates and deploys automatically (DEV) or manually (SIT/UAT/PROD)
+
+For manual re-import without pipeline:
+
+[source,bash]
+----
+# Remove .done for the changed file
+docker exec midpoint bash -c "find /opt/midpoint/var/post-initial-objects -name '100-resource-hr-system.xml.done' -delete"
+# Restart
+docker compose --env-file midpoint-config/env/dev.env restart midpoint
+----
+
+== Common Patterns
+
+=== Adding a new resource
+
+1. Create XML file with a fixed OID in `post-initial-objects/resources/`
+2. Use `<const>` for environment-specific connection properties
+3. Use `<t:externalData>` for passwords (ProtectedStringType only)
+4. Add constants to all `.env` files
+5. Add secrets to the properties file on each environment
+6. Commit and deploy
+
+=== Updating an existing object
+
+1. Edit the XML file (keep the same OID)
+2. Commit and push
+3. The pipeline's `deploy.sh` detects the change, removes the `.done` file, and restarts midPoint
+4. MidPoint re-imports the object, overwriting the existing one
+
+=== Adding a new constant
+
+1. Add to all `.env` files: `NEW_CONSTANT=value`
+2. Add to `docker-compose.yml` environment: `MP_SET_midpoint_constants_newConstant=${NEW_CONSTANT}`
+3. Use in XML: `<const>newConstant</const>`
+
+== Troubleshooting
+
+=== SchemaException: cannot marshall property value PPV(null)
+
+You are using `<t:externalData>` on a non-ProtectedStringType field. Use `<const>` expression instead:
+
+[source,xml]
+----
+<!-- WRONG: baseAddress is xsd:string, not ProtectedStringType -->
+<cfg:baseAddress>
+    <t:externalData>
+        <t:provider>properties-provider</t:provider>
+        <t:key>hr.baseAddress</t:key>
+    </t:externalData>
+</cfg:baseAddress>
+
+<!-- CORRECT: use const expression -->
+<cfg:baseAddress>
+    <expression>
+        <const>hrBaseAddress</const>
+    </expression>
+</cfg:baseAddress>
+----
+
+=== Object not re-imported after update
+
+Check if the `.done` file exists:
+
+[source,bash]
+----
+docker exec midpoint find /opt/midpoint/var/post-initial-objects -name "*.done"
+----
+
+Remove it and restart:
+
+[source,bash]
+----
+docker exec midpoint rm /opt/midpoint/var/post-initial-objects/resources/100-resource-hr-system.xml.done
+docker compose restart midpoint
+----
+
+=== Constants not resolving
+
+Verify the constant is set as a Java system property:
+
+[source,bash]
+----
+docker exec midpoint bash -c "cat /proc/1/cmdline | tr '\0' '\n' | grep constants"
+----
+
+Check the `.env` file is loaded:
+
+[source,bash]
+----
+docker compose --env-file midpoint-config/env/dev.env config | grep MP_SET
+----

@@ -1,0 +1,65 @@
+version: "3.8"
+
+services:
+  midpoint:
+    image: evolveum/midpoint:latest
+    container_name: midpoint
+    ports:
+      - "8080:8080"
+    environment:
+      # Database connection
+      - MP_SET_midpoint_repository_database=postgresql
+      - MP_SET_midpoint_repository_jdbcUrl=jdbc:postgresql://midpoint-db:5432/midpoint
+      - MP_SET_midpoint_repository_jdbcUsername=midpoint
+      - MP_SET_midpoint_repository_jdbcPassword_FILE=/opt/midpoint/var/secrets/db.password
+      # Entry point: copies post-initial-objects into MIDPOINT_HOME before startup
+      - MP_ENTRY_POINT=/opt/midpoint-dirs-docker-entrypoint
+      # Constants: environment-specific values injected via .env file
+      - MP_SET_midpoint_constants_hrBaseAddress=${HR_BASE_ADDRESS}
+      - MP_SET_midpoint_constants_hrHost=${HR_HOST}
+      - MP_SET_midpoint_constants_ldapHost=${LDAP_HOST}
+      - MP_SET_midpoint_constants_ldapPort=${LDAP_PORT}
+      - MP_SET_midpoint_constants_ldapBaseContext=${LDAP_BASE_CONTEXT}
+      - MP_SET_midpoint_constants_orgName=${ORG_NAME}
+    volumes:
+      # Post-initial-objects: mounted at MP_ENTRY_POINT path
+      # midpoint.sh will copy these into $MIDPOINT_HOME/post-initial-objects/
+      - ./midpoint-config/post-initial-objects:/opt/midpoint-dirs-docker-entrypoint/post-initial-objects:ro
+      # Secrets: properties file for secrets provider
+      - ./midpoint-config/secrets:/opt/midpoint/var/secrets:ro
+      # Persistent data
+      - midpoint_home:/opt/midpoint/var
+    depends_on:
+      midpoint-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/midpoint/actuator/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+
+  midpoint-db:
+    image: postgres:16
+    container_name: midpoint-db
+    environment:
+      - POSTGRES_DB=midpoint
+      - POSTGRES_USER=midpoint
+      - POSTGRES_PASSWORD_FILE=/run/secrets/db_password
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    secrets:
+      - db_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U midpoint"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  midpoint_home:
+  pg_data:
+
+secrets:
+  db_password:
+    file: ./midpoint-config/secrets/db.password

@@ -1,0 +1,108 @@
+stages:
+  - validate
+  - build
+  - deploy
+
+variables:
+  CONFIG_DIR: "midpoint-config"
+  ARTIFACT_NAME: "midpoint-config-${CI_COMMIT_SHORT_SHA}"
+
+# ============================================================
+# Validate: Check XML well-formedness
+# ============================================================
+validate-xml:
+  stage: validate
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache libxml2-utils bash
+  script:
+    - bash scripts/validate.sh "${CONFIG_DIR}/post-initial-objects"
+  rules:
+    - if: $CI_MERGE_REQUEST_ID
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# ============================================================
+# Build: Package configuration as artifact
+# ============================================================
+build-config:
+  stage: build
+  image: alpine:latest
+  script:
+    - tar czf "${ARTIFACT_NAME}.tar.gz" -C "${CONFIG_DIR}" post-initial-objects/
+  artifacts:
+    paths:
+      - "${ARTIFACT_NAME}.tar.gz"
+    expire_in: 30 days
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# ============================================================
+# Deploy templates - reusable job definition
+# ============================================================
+.deploy-template: &deploy-template
+  stage: deploy
+  image: docker:latest
+  services:
+    - docker:dind
+  before_script:
+    - apk add --no-cache bash docker-compose openssh-client
+  script:
+    - bash scripts/deploy.sh "${DEPLOY_ENV}"
+  dependencies:
+    - build-config
+
+# ============================================================
+# Deploy: DEV - auto on merge to main
+# ============================================================
+deploy-dev:
+  <<: *deploy-template
+  variables:
+    DEPLOY_ENV: dev
+  environment:
+    name: dev
+    url: https://midpoint-dev.example.com
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# ============================================================
+# Deploy: SIT - manual trigger
+# ============================================================
+deploy-sit:
+  <<: *deploy-template
+  variables:
+    DEPLOY_ENV: sit
+  environment:
+    name: sit
+    url: https://midpoint-sit.example.com
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
+
+# ============================================================
+# Deploy: UAT - manual trigger
+# ============================================================
+deploy-uat:
+  <<: *deploy-template
+  variables:
+    DEPLOY_ENV: uat
+  environment:
+    name: uat
+    url: https://midpoint-uat.example.com
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
+
+# ============================================================
+# Deploy: PROD - manual trigger with approval
+# ============================================================
+deploy-prod:
+  <<: *deploy-template
+  variables:
+    DEPLOY_ENV: prod
+  environment:
+    name: prod
+    url: https://midpoint.example.com
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
+      allow_failure: false

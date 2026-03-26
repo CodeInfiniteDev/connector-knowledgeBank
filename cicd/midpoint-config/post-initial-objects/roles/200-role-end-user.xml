@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Example End User Role
+    Imported via post-initial-objects.
+    No environment-specific values - same across all environments.
+-->
+<role xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+      oid="00000000-0000-0000-0000-000000000008">
+    <name>End user</name>
+    <description>
+        Role authorizing end users to log in, change their passwords and review their own data.
+    </description>
+    <authorization>
+        <name>gui-self-service-access</name>
+        <action>http://midpoint.evolveum.com/xml/ns/public/security/authorization-ui-3#selfDashboard</action>
+        <action>http://midpoint.evolveum.com/xml/ns/public/security/authorization-ui-3#selfProfile</action>
+        <action>http://midpoint.evolveum.com/xml/ns/public/security/authorization-ui-3#selfCredentials</action>
+    </authorization>
+    <authorization>
+        <name>self-read</name>
+        <action>http://midpoint.evolveum.com/xml/ns/public/security/authorization-model-3#read</action>
+        <object>
+            <special>self</special>
+        </object>
+    </authorization>
+    <authorization>
+        <name>self-shadow-read</name>
+        <action>http://midpoint.evolveum.com/xml/ns/public/security/authorization-model-3#read</action>
+        <object>
+            <type>ShadowType</type>
+            <owner>
+                <special>self</special>
+            </owner>
+        </object>
+    </authorization>
+</role>
